@@ -38,28 +38,21 @@ Built directly into mise, written in Rust for performance and reliability:
 - **Benefits**: Fastest performance, no external dependencies, best integration
 - **Drawbacks**: Require much more maintenance; new core tool contributions are likely to be rejected unless they're for very popular tools like Node.js, Python, or Go
 
-**Note**: Core tools like Node.js and Java are implemented as backends even though they represent single tools. This consistent backend architecture allows mise to handle all tools uniformly, whether they're complex ecosystems or individual tools.
+::: info
+Core tools like Node.js and Java are implemented as backends even though they represent single tools. This consistent backend architecture allows mise to handle all tools uniformly, whether they're complex ecosystems or individual tools.
+:::
 
 ### Language Package Managers
 
 Leverage existing language ecosystems:
 
-- **npm** - Node.js packages (`npm:prettier`, `npm:typescript`)
+- **npm** - npm packages (`npm:prettier`, `npm:typescript`)
 - **pipx** - Python packages (`pipx:black`, `pipx:poetry`)
-- **cargo** - Rust packages (`cargo:ripgrep`, `cargo:fd-find`)
-- **gem** - Ruby packages (`gem:bundler`, `gem:rails`)
-- **go** - Go packages (`go:github.com/golangci/golangci-lint/cmd/golangci-lint`)
+- **cargo** - Rust crates (`cargo:ripgrep`, `cargo:fd-find`)
+- **gem** - Ruby gems (`gem:bundler`, `gem:rails`)
+- **go** - Go modules (`go:github.com/golangci/golangci-lint/cmd/golangci-lint`)
 
 ### Universal Installers
-
-#### ubi - Universal Binary Installer
-
-Zero-configuration installer that works with any GitHub/GitLab repository following standard conventions:
-
-- **Usage**: `ubi:BurntSushi/ripgrep`
-- **Requirements**: Repository must follow standard release tarball conventions
-- **Sources**: Primarily GitHub releases, with GitLab support (rarely used in mise)
-- **Configuration**: None required - automatically detects and downloads appropriate binaries
 
 #### aqua - Comprehensive Package Manager
 
@@ -70,23 +63,44 @@ Registry-based package manager with strong security features:
 - **Sources**: Primarily GitHub but supports other sources through registry configuration
 - **Security**: Comprehensive checksums, signatures, and verification
 
+#### ubi - Universal Binary Installer
+
+Zero-configuration installer that works with any GitHub/GitLab repository following standard conventions:
+
+- **Usage**: `ubi:BurntSushi/ripgrep`
+- **Requirements**: Repository must follow standard release tarball conventions
+- **Sources**: Primarily GitHub releases, with GitLab support (rarely used in mise)
+- **Configuration**: None required - automatically detects and downloads appropriate binaries
+
 ### Plugin Systems
 
 Support for external plugin ecosystems:
 
-- **asdf** - Vast ecosystem of community plugins (`asdf:postgres`, `asdf:redis`) - Linux/macOS only
-- **vfox** - Cross-platform plugin system (`vfox:nodejs`, `vfox:python`) - includes Windows support
+- **Tool Plugins** - Hook-based plugins for single tools (`my-tool`) - a superset of vfox plugins functionality
+- **asdf Plugins** - Legacy plugin ecosystem (`asdf:postgres`, `asdf:redis`) - generally Linux/macOS only
+- **Backend Plugins** - Enhanced plugins using the `plugin:tool` format (`my-plugin:some-tool`) - enables private/custom tools with backend methods
 
 ## How Backend Selection Works
 
 When you specify a tool, mise determines the backend using this priority:
 
 1. **Explicit backend**: `mise use aqua:golangci/golangci-lint`
-2. **Registry lookup**: `mise use golangci-lint` → checks registry for default backend
-3. **Core tools**: `mise use node` → uses built-in core backend
-4. **Fallback**: If not found, suggests available backends
+2. **Environment variable override**: `MISE_BACKENDS_<TOOL>` (see below)
+3. **Registry lookup**: `mise use golangci-lint` → checks registry for default backend
+4. **Core tools**: `mise use node` → uses built-in core backend
+5. **Fallback**: If not found, suggests available backends
 
 The [mise registry](../registry.md) defines a priority order for which backend to use for each tool, so typically end-users don't need to know which backend to choose unless they want tools not available in the registry or want to override the default selection.
+
+### Environment Variable Overrides
+
+You can override the backend for any tool using the `MISE_BACKENDS_<TOOL>` environment variable pattern. The tool name is converted to SHOUTY_SNAKE_CASE (uppercase with underscores replacing hyphens).
+
+```bash
+# Use vfox backend for php
+export MISE_BACKENDS_PHP='vfox:mise-plugins/vfox-php'
+mise install php@latest
+```
 
 ### Registry System
 
@@ -101,13 +115,13 @@ terraform = "aqua:hashicorp/terraform"  # Use aqua backend
 
 ## Backend Capabilities Comparison
 
-| Feature | Core | npm/pipx/cargo | ubi | aqua | asdf | vfox |
-|---------|------|----------------|-----|------|------|------|
-| **Speed** | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ |
-| **Security** | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ | ⚠️ |
-| **Windows Support** | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
-| **Env Var Support** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| **Custom Scripts** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Feature             | Core | npm/pipx/cargo | aqua | ubi | Backend Plugins | Tool Plugins (vfox) | asdf Plugins (legacy) |
+| ------------------- | ---- | -------------- | ---- | --- | --------------- | ------------------- | --------------------- |
+| **Speed**           | ✅   | ⚠️             | ✅   | ✅  | ⚠️              | ⚠️                  | ⚠️                    |
+| **Security**        | ✅   | ⚠️             | ✅   | ⚠️  | ⚠️              | ⚠️                  | ⚠️                    |
+| **Windows Support** | ✅   | ✅             | ✅   | ✅  | ✅              | ✅                  | ❌                    |
+| **Env Var Support** | ✅   | ❌             | ❌   | ❌  | ✅              | ✅                  | ✅                    |
+| **Custom Scripts**  | ✅   | ❌             | ❌   | ❌  | ✅              | ✅                  | ✅                    |
 
 ## When to Use Each Backend
 
@@ -117,21 +131,13 @@ terraform = "aqua:hashicorp/terraform"  # Use aqua backend
 - You want the fastest performance
 - You're using major programming languages
 
-**Note**: Core tools should generally always be used when available, as they provide the best performance and integration with mise.
+Core tools should generally always be used when available, as they provide the best performance and integration with mise.
 
 ### Use **Language Package Managers** when
 
 - Installing tools specific to that language ecosystem
 - The tool is primarily distributed through that package manager
 - You want automatic dependency management
-
-### Use **ubi** when
-
-- Installing pre-compiled binaries from GitHub/GitLab releases
-- The repository follows standard conventions for release tarballs
-- You want zero configuration - no registry setup required
-- You need simple, fast binary installation
-- The tool doesn't require complex build processes or environment setup
 
 ### Use **aqua** when
 
@@ -141,7 +147,32 @@ terraform = "aqua:hashicorp/terraform"  # Use aqua backend
 - The tool is already available in the [aqua registry](https://github.com/aquaproj/aqua-registry)
 - You're willing to contribute tools to the aqua registry for tools not yet available
 
-### Use **asdf** when
+### Use **ubi** when
+
+- Installing pre-compiled binaries from GitHub/GitLab releases
+- The repository follows standard conventions for release tarballs
+- You want zero configuration - no registry setup required
+- You need simple, fast binary installation
+- The tool doesn't require complex build processes or environment setup
+
+### Use **Backend Plugins** when
+
+- You need to manage multiple tools with one plugin
+- Want enhanced backend methods for better performance
+- Need the `plugin:tool` format for flexibility
+- Working with custom or private tools
+- Want modern plugin architecture with backend methods
+
+### Use **Tool Plugins** when
+
+- Creating traditional single-tool plugins
+- Need fine-grained control over installation hooks
+- Want to use the vfox hook system
+- Tool requires complex installation logic or build processes
+- Tool requires environment variable setup (like `JAVA_HOME`, `GOROOT`, etc.)
+- You need cross-platform support including Windows
+
+### Use **asdf Plugins** when
 
 - Tool requires compilation from source
 - Need complex installation logic or build processes
@@ -150,14 +181,6 @@ terraform = "aqua:hashicorp/terraform"  # Use aqua backend
 - Migrating from existing asdf setup
 - Working on Linux/macOS (no Windows support)
 
-### Use **vfox** when
-
-- Tool requires compilation from source
-- Need complex installation logic or build processes
-- Tool requires environment variable setup (like `JAVA_HOME`, `GOROOT`, etc.)
-- You need cross-platform support including Windows
-- Want a newer plugin system with better performance than asdf
-
 ## Backend Dependencies
 
 Some backends have dependencies on others:
@@ -165,12 +188,12 @@ Some backends have dependencies on others:
 ```mermaid
 graph TD
     A[npm backend] --> B[Node.js]
-    C[pipx backend] --> D[Python]
+    C[pipx backend] --> D[pipx]
     E[cargo backend] --> F[Rust]
     G[gem backend] --> H[Ruby]
 ```
 
-mise automatically handles these dependencies, installing Node.js before npm tools, Python before pipx tools, etc.
+mise automatically handles these dependencies, installing Node.js before npm tools, pipx before pipx tools, etc.
 
 ## Configuration and Overrides
 
@@ -179,7 +202,7 @@ mise automatically handles these dependencies, installing Node.js before npm too
 ```toml
 # ~/.config/mise/config.toml
 [settings]
-disable_backends = ["asdf", "vfox"]  # Don't use these backends
+disable_backends = ["asdf", "vfox"] # Don't use these backends
 ```
 
 ### Force Backend for Tool
@@ -187,8 +210,8 @@ disable_backends = ["asdf", "vfox"]  # Don't use these backends
 ```toml
 # mise.toml
 [tools]
-node = "core:node@20"     # Explicitly use core backend
-prettier = "npm:prettier" # Use npm backend instead of default
+"core:node" = "20"     # Explicitly use core backend
+"aqua:yarn" = "latest" # Use aqua backend instead of default (vfox)
 ```
 
 ### Backend-Specific Settings

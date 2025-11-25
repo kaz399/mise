@@ -19,13 +19,13 @@ pub struct TasksDeps {
     #[clap(verbatim_doc_comment)]
     pub tasks: Option<Vec<String>>,
 
-    /// Show hidden tasks
-    #[clap(long, verbatim_doc_comment)]
-    pub hidden: bool,
-
     /// Display dependencies in DOT format
     #[clap(long, alias = "dot", verbatim_doc_comment)]
     pub dot: bool,
+
+    /// Show hidden tasks
+    #[clap(long, verbatim_doc_comment)]
+    pub hidden: bool,
 }
 
 impl TasksDeps {
@@ -140,7 +140,11 @@ impl TasksDeps {
         let tasks = config
             .tasks()
             .await
-            .map(|t| t.values().map(|v| &v.display_name).collect::<Vec<_>>())
+            .map(|t| {
+                t.values()
+                    .map(|v| v.display_name.clone())
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         let task_names = tasks.into_iter().map(style::ecyan).join(", ");
         let t = style(&t).yellow().for_stderr();

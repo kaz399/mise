@@ -5,7 +5,7 @@ use std::fmt::Display;
 use indoc::formatdoc;
 
 use crate::path::{PathEscape, to_path_list};
-use crate::shell::{ActivateOptions, ActivatePrelude, Shell};
+use crate::shell::{self, ActivateOptions, ActivatePrelude, Shell};
 use itertools::Itertools;
 
 #[derive(Default)]
@@ -55,9 +55,36 @@ impl Shell for Nushell {
         );
 
         let mut out = String::new();
-        out.push_str(&self.format_activate_prelude_inline(&opts.prelude));
+
+        out.push_str(&formatdoc! {r#"
+          def "parse vars" [] {{
+            $in | from csv --noheaders --no-infer | rename 'op' 'name' 'value'
+          }}
+
+          def --env "update-env" [] {{
+            for $var in $in {{
+              if $var.op == "set" {{
+                if ($var.name | str upcase) == 'PATH' {{
+                  $env.PATH = ($var.value | split row (char esep))
+                }} else {{
+                  load-env {{($var.name): $var.value}}
+                }}
+              }} else if $var.op == "hide" and $var.name in $env {{
+                hide-env $var.name
+              }}
+            }}
+          }}
+        "#});
+
+        let deactivation_ops_csv = &shell::build_deactivation_script(self);
+        out.push_str(&formatdoc! {r#"
+          "{deactivation_ops_csv}" | parse vars | update-env
+        "#});
+
+        let inline_prelude = self.format_activate_prelude_inline(&opts.prelude);
         out.push_str(&formatdoc! {r#"
           export-env {{
+            {inline_prelude}
             $env.MISE_SHELL = "nu"
             let mise_hook = {{
               condition: {{ "MISE_SHELL" in $env }}
@@ -68,13 +95,10 @@ impl Shell for Nushell {
           }}
 
           def --env add-hook [field: cell-path new_hook: any] {{
+            let field = $field | split cell-path | update optional true | into cell-path
             let old_config = $env.config? | default {{}}
-            let old_hooks = $old_config | get $field --ignore-errors | default []
+            let old_hooks = $old_config | get $field | default []
             $env.config = ($old_config | upsert $field ($old_hooks ++ [$new_hook]))
-          }}
-
-          def "parse vars" [] {{
-            $in | from csv --noheaders --no-infer | rename 'op' 'name' 'value'
           }}
 
           export def --env --wrapped main [command?: string, --help, ...rest: string] {{
@@ -90,20 +114,6 @@ impl Shell for Nushell {
               | update-env
             }} else {{
               ^"{exe}" $command ...$rest
-            }}
-          }}
-
-          def --env "update-env" [] {{
-            for $var in $in {{
-              if $var.op == "set" {{
-                if $var.name == 'PATH' {{
-                  $env.PATH = ($var.value | split row (char esep))
-                }} else {{
-                  load-env {{($var.name): $var.value}}
-                }}
-              }} else if $var.op == "hide" {{
-                hide-env $var.name
-              }}
             }}
           }}
 

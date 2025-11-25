@@ -1,34 +1,28 @@
 ---
 outline: [1, 3]
 ---
+
 # Contributing
 
-Before submitting a PR, unless it's something obvious, consider filing an issue
+Before submitting a PR, unless it's something obvious, consider creating a
+[discussion](https://github.com/jdx/mise/discussions)
 or simply mention what you plan to do in the
 [Discord](https://discord.gg/UBa7pJUN7Z).
 PRs are often either rejected or need to change significantly after submission
 so make sure before you start working on something it won't be a wasted effort.
 
-Issues ideal for contributors can be found with the
-["help wanted"](https://github.com/jdx/mise/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
-and
-["good first issue"](https://github.com/jdx/mise/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22good%20first%20issue%22)
-labels. These are issues that I feel are self-contained therefore don't require
-super in-depth understanding of the codebase or that require knowledge about
-something I don't understand very well myself.
-
 ## Contributing Guidelines
 
-1. **Before starting**: File an issue or discuss in Discord for non-obvious changes
-2. **Look for issues**: Check "help wanted" and "good first issue" labels
-3. **Test thoroughly**: Ensure both unit and E2E tests pass
-4. **Follow conventions**: Use existing code style and patterns
-5. **Update documentation**: Add/update docs for new features
+1. **Before starting**: Create a discussion or discuss in Discord for non-obvious changes
+2. **Test thoroughly**: Ensure both unit and E2E tests pass
+3. **Follow conventions**: Use existing code style and patterns
+4. **Update documentation**: Add/update docs for new features
 
 ### Pull Request Workflow
 
 1. **PR titles**: Must follow conventional commit format (validated
    automatically)
+   - For new tools in registry: Use `registry: add tool-name`
 2. **Auto-formatting**: Code will be automatically formatted by autofix.ci
 3. **CI checks**: All tests must pass across Linux, macOS, and Windows
 4. **Coverage**: New code should maintain or improve test coverage
@@ -43,6 +37,20 @@ something I don't understand very well myself.
 4. **Update snapshots**: Use `mise run snapshots` when changing test outputs
 5. **Rate limiting**: Set `MISE_GITHUB_TOKEN` to avoid GitHub API rate limits
    during development
+
+## Packaging and Self-Update Instructions
+
+When mise is installed via a package manager, in-app self-update is disabled and users should update via their package manager. Packaging should install a TOML file with platform-specific instructions at `lib/mise-self-update-instructions.toml` (or `lib/mise/mise-self-update-instructions.toml`). Example contents:
+
+```toml
+# Debian/Ubuntu (APT)
+message = "To update mise from the APT repository, run:\n\n  sudo apt update && sudo apt install --only-upgrade mise\n"
+```
+
+```toml
+# Fedora/CentOS Stream (DNF)
+message = "To update mise from COPR, run:\n\n  sudo dnf upgrade mise\n"
+```
 
 ## Testing
 
@@ -534,7 +542,7 @@ should follow this format:
 - **feat**: New features (🚀 Features)
 - **fix**: Bug fixes (🐛 Bug Fixes)
 - **refactor**: Code refactoring (🚜 Refactor)
-- **doc**: Documentation changes (📚 Documentation)
+- **docs**: Documentation changes (📚 Documentation)
 - **style**: Code style changes (🎨 Styling)
 - **perf**: Performance improvements (⚡ Performance)
 - **test**: Testing changes (🧪 Testing)
@@ -547,7 +555,7 @@ should follow this format:
 feat(cli): add new command for listing plugins
 fix(parser): handle edge case in version parsing
 refactor(config): simplify configuration loading logic
-doc(readme): update installation instructions
+docs(readme): update installation instructions
 test(e2e): add tests for new plugin functionality
 chore(deps): update dependencies to latest versions
 ```
@@ -633,6 +641,7 @@ of the full backend specification.
 ### Quick Start
 
 1. **Choose the right backend** for your tool:
+
    - **[aqua](dev-tools/backends/aqua.md)** - Preferred for GitHub releases with security
      features
    - **[ubi](dev-tools/backends/ubi.md)** - Simple GitHub/GitLab releases following
@@ -658,10 +667,12 @@ When adding a new tool, the following requirements apply (automatically
 enforced by [GitHub Actions workflow](https://github.com/jdx/mise/blob/main/.github/workflows/registry_comment.yml)):
 
 - **New asdf plugins are not accepted** - Use aqua/ubi instead
-- **Tools may be rejected if they are not notable** - The tool should be
-  reasonably popular and well-maintained
 - **A test is required in `registry.toml`** - Must include a `test` field to
   verify installation
+- **Tools may be rejected if they are not notable** - The tool should be
+  reasonably popular and well-maintained. There are no specific guidelines for this and
+  a lot of factors are taken into account. @jdx won't explain why a given tool wasn't
+  accepted.
 
 ### Registry Format
 
@@ -730,10 +741,10 @@ mechanisms (like `aqua` or `ubi`). If you want to add a specific tool to mise,
 see [Adding Tools](#adding-tools) instead.
 :::
 
-:::warning Backend Acceptance Policy
-**New backends are unlikely to be accepted into mise core.** The current vision
-is to make vfox plugins capable of defining custom backends, but this
-functionality is not yet implemented.
+:::warning Core Backend Acceptance Policy
+**New backends are unlikely to be accepted into mise core.** They require
+a lot of maintenance so it's generally better to use the [backend plugin system](backend-plugin-development.md) to add backends without core changes. A new backend would only be accepted for a major package manager
+or tool that would greatly enhance mise's capabilities.
 
 If you need a custom backend:
 
@@ -741,8 +752,7 @@ If you need a custom backend:
    creating a [discussion](https://github.com/jdx/mise/discussions)
 2. **Consider if existing backends** (ubi, aqua, npm, pipx, etc.) can meet your
    needs
-3. **Help implement vfox plugin backend support** - this would enable custom
-   backends without core changes
+3. **Create a plugin** - use the [plugin system](tool-plugin-development.md) to create plugins for private/custom tools without core changes. Start with the [mise-tool-plugin-template](https://github.com/jdx/mise-tool-plugin-template) for a quick setup
 
 Most tool installation needs can be met by existing backends, especially
 [ubi](dev-tools/backends/ubi.md) for GitHub releases and
@@ -761,7 +771,7 @@ across different installation systems.
   modules
 - **Universal Installers** (`src/backend/`) - ubi, aqua for GitHub releases and
   package management
-- **Plugin Backends** (`src/backend/`) - asdf and vfox plugin compatibility
+- **Plugin Backends** (`src/backend/`) - plugins can provide custom backends or individual tools
 
 ### Implementation Steps
 
@@ -772,33 +782,34 @@ across different installation systems.
    ```rust
    use crate::backend::{Backend, BackendType};
    use crate::install_context::InstallContext;
-   
+
    #[derive(Debug)]
    pub struct MyBackend {
        // backend-specific fields
    }
-   
+
    impl Backend for MyBackend {
        fn get_type(&self) -> BackendType { BackendType::MyBackend }
-       
+
        async fn list_remote_versions(&self) -> Result<Vec<String>> {
            // Implementation for listing available versions
        }
-       
-       async fn install_version(&self, ctx: &InstallContext, 
+
+       async fn install_version(&self, ctx: &InstallContext,
                                  tv: &ToolVersion) -> Result<()> {
            // Implementation for installing a specific version
        }
-       
+
        async fn uninstall_version(&self, tv: &ToolVersion) -> Result<()> {
            // Implementation for uninstalling a version
        }
-       
+
        // ... other required methods
    }
    ```
 
 3. **Register the backend** in `src/backend/mod.rs`:
+
    - Add your backend to the imports
    - Add it to the backend registry/factory function
    - Add the `BackendType` enum variant
@@ -842,34 +853,26 @@ This is for arm64, but you can change the arch to amd64 if you want.
 ```sh
 docker run -ti --rm ubuntu
 apt update -y
-apt install -y gpg sudo wget curl
-sudo install -dm 755 /etc/apt/keyrings
-wget -qO - https://mise.jdx.dev/gpg-key.pub | gpg --dearmor | \
-  sudo tee /etc/apt/keyrings/mise-archive-keyring.gpg 1> /dev/null
-echo "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.gpg arch=arm64] \
-https://mise.jdx.dev/deb stable main" | sudo tee /etc/apt/sources.list.d/mise.list
-apt update
+apt install -y curl
+install -dm 755 /etc/apt/keyrings
+curl -fSso /etc/apt/keyrings/mise-archive-keyring.pub https://mise.jdx.dev/gpg-key.pub
+echo "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.pub arch=arm64] \
+https://mise.jdx.dev/deb stable main" >/etc/apt/sources.list.d/mise.list
+apt update -y
 apt install -y mise
 mise -V
-```
-
-### Amazon Linux 2 (yum)
-
-```sh
-docker run -ti --rm amazonlinux
-yum install -y yum-utils
-yum-config-manager --add-repo https://mise.jdx.dev/rpm/mise.repo
-yum install -y mise
-mise -v
 ```
 
 ### Fedora (dnf)
 
 ```sh
 docker run -ti --rm fedora
-dnf install -y dnf-plugins-core
-dnf config-manager addrepo \
-  --from-repofile=https://mise.jdx.dev/rpm/mise.repo
-dnf install -y mise
-mise -v
+dnf copr enable -y jdxcode/mise && dnf install -y mise && mise -v
+```
+
+### RHEL (dnf)
+
+```sh
+docker run -ti --rm registry.access.redhat.com/ubi9/ubi:latest
+dnf copr enable -y jdxcode/mise && dnf install -y mise && mise -v
 ```

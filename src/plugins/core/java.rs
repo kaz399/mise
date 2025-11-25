@@ -22,6 +22,7 @@ use indoc::formatdoc;
 use itertools::Itertools;
 use regex::Regex;
 use serde_derive::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::sync::LazyLock as Lazy;
 use versions::Versioning;
 use xx::regex;
@@ -90,7 +91,7 @@ impl JavaPlugin {
         tv.install_path().join("bin/java")
     }
 
-    fn test_java(&self, tv: &ToolVersion, pr: &Box<dyn SingleReport>) -> Result<()> {
+    fn test_java(&self, tv: &ToolVersion, pr: &dyn SingleReport) -> Result<()> {
         CmdLineRunner::new(self.java_bin(tv))
             .with_pr(pr)
             .env("JAVA_HOME", tv.install_path())
@@ -102,7 +103,7 @@ impl JavaPlugin {
         &self,
         ctx: &InstallContext,
         tv: &mut ToolVersion,
-        pr: &Box<dyn SingleReport>,
+        pr: &dyn SingleReport,
         m: &JavaMetadata,
     ) -> Result<PathBuf> {
         let filename = m.url.split('/').next_back().unwrap();
@@ -111,9 +112,13 @@ impl JavaPlugin {
         pr.set_message(format!("download {filename}"));
         HTTP.download_file(&m.url, &tarball_path, Some(pr)).await?;
 
-        if !tv.checksums.contains_key(filename) && m.checksum.is_some() {
-            tv.checksums
-                .insert(filename.to_string(), m.checksum.as_ref().unwrap().clone());
+        let platform_key = self.get_platform_key();
+        if !tv.lock_platforms.contains_key(&platform_key) {
+            let platform_info = tv.lock_platforms.entry(platform_key).or_default();
+            platform_info.url = Some(m.url.clone());
+            if m.checksum.is_some() {
+                platform_info.checksum = m.checksum.clone();
+            }
         }
         self.verify_checksum(ctx, tv, &tarball_path)?;
 
@@ -123,14 +128,14 @@ impl JavaPlugin {
     fn install(
         &self,
         tv: &ToolVersion,
-        pr: &Box<dyn SingleReport>,
+        pr: &dyn SingleReport,
         tarball_path: &Path,
         m: &JavaMetadata,
     ) -> Result<()> {
         let filename = tarball_path.file_name().unwrap().to_string_lossy();
         pr.set_message(format!("extract {filename}"));
         match m.file_type.as_deref() {
-            Some("zip") => file::unzip(tarball_path, &tv.download_path())?,
+            Some("zip") => file::unzip(tarball_path, &tv.download_path(), &Default::default())?,
             _ => file::untar(
                 tarball_path,
                 &tv.download_path(),
@@ -229,7 +234,7 @@ impl JavaPlugin {
         Ok(())
     }
 
-    fn verify(&self, tv: &ToolVersion, pr: &Box<dyn SingleReport>) -> Result<()> {
+    fn verify(&self, tv: &ToolVersion, pr: &dyn SingleReport) -> Result<()> {
         pr.set_message("java -version".into());
         self.test_java(tv, pr)
     }
@@ -291,16 +296,22 @@ impl Backend for JavaPlugin {
         &self.ba
     }
 
-    async fn _list_remote_versions(&self, _config: &Arc<Config>) -> Result<Vec<String>> {
-        // TODO: find out how to get this to work for different os/arch
-        // See https://github.com/jdx/mise/issues/1196
-        // match self.core.fetch_remote_versions_from_mise() {
-        //     Ok(Some(versions)) => return Ok(versions),
-        //     Ok(None) => {}
-        //     Err(e) => warn!("failed to fetch remote versions: {}", e),
-        // }
+    async fn list_remote_versions(&self, config: &Arc<Config>) -> eyre::Result<Vec<String>> {
+        self._list_remote_versions(config).await
+    }
+
+    async fn _list_remote_versions(&self, config: &Arc<Config>) -> Result<Vec<String>> {
+        let release_type = config
+            .get_tool_request_set()
+            .await?
+            .list_tools()
+            .iter()
+            .find(|ba| ba.short == "java")
+            .and_then(|ba| ba.opts().get("release_type").cloned())
+            .unwrap_or_else(|| "ga".to_string());
+
         let versions = self
-            .fetch_java_metadata("ga")
+            .fetch_java_metadata(&release_type)
             .await?
             .iter()
             .sorted_by_cached_key(|(v, m)| {
@@ -312,12 +323,28 @@ impl Backend for JavaPlugin {
                     .is_some_and(|image_type| image_type == "jdk");
                 let features = 10 - m.features.as_ref().map_or(0, |f| f.len());
                 let version = Versioning::new(v);
+                // Extract build suffix after a '+', '.' if present. If not present, treat as 0.
+                let build_num = v
+                    .rsplit_once('+')
+                    .or_else(|| v.rsplit_once('.'))
+                    .and_then(|(_, tail)| {
+                        // take leading digits of tail
+                        let digits: String =
+                            tail.chars().take_while(|c| c.is_ascii_digit()).collect();
+                        if digits.is_empty() {
+                            None
+                        } else {
+                            u64::from_str(&digits).ok()
+                        }
+                    })
+                    .unwrap_or(0u64);
                 (
                     is_shorthand,
                     vendor,
                     is_jdk,
                     features,
                     version,
+                    build_num,
                     v.to_string(),
                 )
             })
@@ -343,15 +370,15 @@ impl Backend for JavaPlugin {
     }
 
     fn get_aliases(&self) -> Result<BTreeMap<String, String>> {
-        let aliases = BTreeMap::from([("lts".into(), "21".into())]);
+        let aliases = BTreeMap::from([("lts".into(), "25".into())]);
         Ok(aliases)
     }
 
-    fn idiomatic_filenames(&self) -> Result<Vec<String>> {
+    async fn idiomatic_filenames(&self) -> Result<Vec<String>> {
         Ok(vec![".java-version".into(), ".sdkmanrc".into()])
     }
 
-    fn parse_idiomatic_file(&self, path: &Path) -> Result<String> {
+    async fn parse_idiomatic_file(&self, path: &Path) -> Result<String> {
         let contents = file::read_to_string(path)?;
         if path.file_name() == Some(".sdkmanrc".as_ref()) {
             let version = contents
@@ -393,10 +420,50 @@ impl Backend for JavaPlugin {
         ctx: &InstallContext,
         mut tv: ToolVersion,
     ) -> eyre::Result<ToolVersion> {
-        let metadata = self.tv_to_metadata(&tv).await?;
-        let tarball_path = self.download(ctx, &mut tv, &ctx.pr, metadata).await?;
-        self.install(&tv, &ctx.pr, &tarball_path, metadata)?;
-        self.verify(&tv, &ctx.pr)?;
+        // Java installation has 3 operations: download, install (extract), verify
+        ctx.pr.start_operations(3);
+
+        // Check if URL already exists in lockfile platforms first
+        let platform_key = self.get_platform_key();
+        let (metadata, tarball_path) =
+            if let Some(platform_info) = tv.lock_platforms.get(&platform_key) {
+                if let Some(ref url) = platform_info.url {
+                    // Use the filename from the URL, not the platform key
+                    let filename = url.split('/').next_back().unwrap();
+                    debug!("Using existing URL from lockfile for {}: {}", filename, url);
+                    let tarball_path = tv.download_path().join(filename);
+
+                    // If the file does not exist, download using the lockfile URL
+                    if !tarball_path.exists() {
+                        debug!("File not found, downloading from cached URL: {}", url);
+                        // Download using the lockfile URL, not JavaMetadata
+                        HTTP.download_file(url, &tarball_path, Some(ctx.pr.as_ref()))
+                            .await?;
+                        // Optionally verify checksum if present
+                        self.verify_checksum(ctx, &mut tv, &tarball_path)?;
+                    }
+
+                    // Fetch metadata for installation (for install/move logic)
+                    let metadata = self.tv_to_metadata(&tv).await?;
+                    (metadata, tarball_path)
+                } else {
+                    // No URL in lockfile, fallback to metadata
+                    let metadata = self.tv_to_metadata(&tv).await?;
+                    let tarball_path = self
+                        .download(ctx, &mut tv, ctx.pr.as_ref(), metadata)
+                        .await?;
+                    (metadata, tarball_path)
+                }
+            } else {
+                let metadata = self.tv_to_metadata(&tv).await?;
+                let tarball_path = self
+                    .download(ctx, &mut tv, ctx.pr.as_ref(), metadata)
+                    .await?;
+                (metadata, tarball_path)
+            };
+
+        self.install(&tv, ctx.pr.as_ref(), &tarball_path, metadata)?;
+        self.verify(&tv, ctx.pr.as_ref())?;
 
         Ok(tv)
     }
@@ -415,17 +482,11 @@ impl Backend for JavaPlugin {
     }
 
     fn fuzzy_match_filter(&self, versions: Vec<String>, query: &str) -> Vec<String> {
-        let query_trim = regex::escape(query.trim_end_matches('-'));
-        let query_version = format!("{}[0-9.]+", regex::escape(query));
-        let query_trim_version = format!("{query_trim}-[0-9.]+");
+        let query_escaped = regex::escape(query);
         let query = match query {
             "latest" => "[0-9].*",
-            // ends with a dash; use <query><version>
-            q if q.ends_with('-') => &query_version,
-            // not a shorthand version; use <query>-<version>
-            q if regex!("^[a-zA-Z]+$").is_match(q) => &query_trim_version,
-            // else; use trimmed query
-            _ => &query_trim,
+            // else; use escaped query
+            _ => &query_escaped,
         };
         let query_regex = Regex::new(&format!("^{query}([+-.].+)?$")).unwrap();
 
@@ -447,21 +508,19 @@ impl Backend for JavaPlugin {
 fn os() -> &'static str {
     if cfg!(target_os = "macos") {
         "macosx"
+    } else if OS.as_str() == "freebsd" {
+        "linux"
     } else {
         &OS
     }
 }
 
 fn arch(settings: &Settings) -> &str {
-    let arch = settings.arch();
-    if arch == "x86_64" {
-        "x86_64"
-    } else if arch == "arm" {
-        "arm32-vfp-hflt"
-    } else if arch == "aarch64" {
-        "aarch64"
-    } else {
-        arch
+    match settings.arch() {
+        "x64" => "x86_64",
+        "arm64" => "aarch64",
+        "arm" => "arm32-vfp-hflt",
+        other => other,
     }
 }
 
@@ -475,7 +534,7 @@ struct JavaMetadata {
     file_type: Option<String>,
     // filename: String,
     image_type: Option<String>,
-    // java_version: String,
+    java_version: String,
     jvm_impl: String,
     // os: String,
     // release_type: String,
@@ -506,6 +565,14 @@ impl Display for JavaMetadata {
         }
         if self.jvm_impl == "openj9" {
             v.push(self.jvm_impl.clone());
+        }
+        if self.vendor == "liberica-nik" {
+            let major = self
+                .java_version
+                .split('.')
+                .next()
+                .unwrap_or(&self.java_version);
+            v.push(format!("openjdk{}", major));
         }
         v.push(self.version.clone());
         write!(f, "{}", v.join("-"))

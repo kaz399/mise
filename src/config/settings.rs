@@ -39,6 +39,7 @@ pub enum SettingsType {
     ListString,
     ListPath,
     SetString,
+    IndexMap,
 }
 
 pub struct SettingsMeta {
@@ -78,10 +79,10 @@ static CLI_SETTINGS: Mutex<Option<SettingsPartial>> = Mutex::new(None);
 static DEFAULT_SETTINGS: Lazy<SettingsPartial> = Lazy::new(|| {
     let mut s = SettingsPartial::empty();
     s.python.default_packages_file = Some(env::HOME.join(".default-python-packages"));
-    if let Some("alpine" | "nixos") = env::LINUX_DISTRO.as_ref().map(|s| s.as_str()) {
-        if !cfg!(test) {
-            s.all_compile = Some(true);
-        }
+    if let Some("alpine" | "nixos") = env::LINUX_DISTRO.as_ref().map(|s| s.as_str())
+        && !cfg!(test)
+    {
+        s.all_compile = Some(true);
     }
     s
 });
@@ -131,10 +132,14 @@ impl Settings {
 
         settings = sb.load()?;
         if !settings.legacy_version_file {
-            settings.idiomatic_version_file = false;
+            settings.idiomatic_version_file = Some(false);
         }
         if settings.raw {
             settings.jobs = 1;
+        }
+        // Handle NO_COLOR environment variable
+        if *env::NO_COLOR {
+            settings.color = false;
         }
         if settings.debug {
             settings.log_level = "debug".to_string();
@@ -176,7 +181,9 @@ impl Settings {
             settings.yes = true;
         }
         if settings.all_compile {
-            settings.node.compile = Some(true);
+            if settings.node.compile.is_none() {
+                settings.node.compile = Some(true);
+            }
             if settings.python.compile.is_none() {
                 settings.python.compile = Some(true);
             }
@@ -252,13 +259,15 @@ impl Settings {
 
     pub fn add_cli_matches(cli: &Cli) {
         let mut s = SettingsPartial::empty();
-        for arg in &*env::ARGS.read().unwrap() {
-            if arg == "--" {
-                break;
-            }
-            if arg == "--raw" {
-                s.raw = Some(true);
-            }
+
+        // Don't process mise-specific flags when running as a shim
+        if *crate::env::IS_RUNNING_AS_SHIM {
+            Self::reset(Some(s));
+            return;
+        }
+
+        if cli.raw {
+            s.raw = Some(true);
         }
         if let Some(cd) = &cli.cd {
             s.cd = Some(cd.clone());
@@ -272,22 +281,22 @@ impl Settings {
         if cli.yes {
             s.yes = Some(true);
         }
-        if cli.global_output_flags.quiet {
+        if cli.quiet {
             s.quiet = Some(true);
         }
-        if cli.global_output_flags.trace {
+        if cli.trace {
             s.log_level = Some("trace".to_string());
         }
-        if cli.global_output_flags.debug {
+        if cli.debug {
             s.log_level = Some("debug".to_string());
         }
-        if let Some(log_level) = &cli.global_output_flags.log_level {
+        if let Some(log_level) = &cli.log_level {
             s.log_level = Some(log_level.to_string());
         }
-        if cli.global_output_flags.verbose > 0 {
+        if cli.verbose > 0 {
             s.verbose = Some(true);
         }
-        if cli.global_output_flags.verbose > 1 {
+        if cli.verbose > 1 {
             s.log_level = Some("trace".to_string());
         }
         Self::reset(Some(s));
@@ -333,6 +342,8 @@ impl Settings {
     pub fn reset(cli_settings: Option<SettingsPartial>) {
         *CLI_SETTINGS.lock().unwrap() = cli_settings;
         *BASE_SETTINGS.write().unwrap() = None;
+        // Clear caches that depend on settings and environment
+        crate::config::config_file::config_root::reset();
     }
 
     pub fn ensure_experimental(&self, what: &str) -> Result<()> {
@@ -347,6 +358,7 @@ impl Settings {
             .iter()
             .filter(|p| !p.to_string_lossy().is_empty())
             .map(file::replace_path)
+            .filter_map(|p| p.canonicalize().ok())
     }
 
     pub fn global_tools_file(&self) -> PathBuf {
@@ -363,12 +375,12 @@ impl Settings {
 
     pub fn env_files(&self) -> Vec<PathBuf> {
         let mut files = vec![];
-        if let Some(cwd) = &*dirs::CWD {
-            if let Some(env_file) = &self.env_file {
-                let env_file = env_file.to_string_lossy().to_string();
-                for p in FindUp::new(cwd, &[env_file]) {
-                    files.push(p);
-                }
+        if let Some(cwd) = &*dirs::CWD
+            && let Some(env_file) = &self.env_file
+        {
+            let env_file = env_file.to_string_lossy().to_string();
+            for p in FindUp::new(cwd, &[env_file]) {
+                files.push(p);
             }
         }
         files.into_iter().rev().collect()
@@ -404,6 +416,12 @@ impl Settings {
 
     pub fn http_timeout(&self) -> Duration {
         duration::parse_duration(&self.http_timeout).unwrap()
+    }
+
+    pub fn task_timeout_duration(&self) -> Option<Duration> {
+        self.task_timeout
+            .as_ref()
+            .and_then(|s| duration::parse_duration(s).ok())
     }
 
     pub fn log_level(&self) -> log::LevelFilter {
@@ -449,21 +467,31 @@ impl Settings {
     }
 
     pub fn os(&self) -> &str {
-        self.os.as_deref().unwrap_or(OS)
+        match self.os.as_deref().unwrap_or(OS) {
+            "darwin" | "macos" => "macos",
+            "linux" => "linux",
+            "windows" => "windows",
+            other => other,
+        }
     }
 
     pub fn arch(&self) -> &str {
-        self.arch.as_deref().unwrap_or(ARCH)
+        match self.arch.as_deref().unwrap_or(ARCH) {
+            "x86_64" | "amd64" => "x64",
+            "aarch64" | "arm64" => "arm64",
+            other => other,
+        }
     }
 
     pub fn no_config() -> bool {
         *env::MISE_NO_CONFIG
-            || env::ARGS
-                .read()
-                .unwrap()
-                .iter()
-                .take_while(|a| *a != "--")
-                .any(|a| a == "--no-config")
+            || !*crate::env::IS_RUNNING_AS_SHIM
+                && env::ARGS
+                    .read()
+                    .unwrap()
+                    .iter()
+                    .take_while(|a| *a != "--")
+                    .any(|a| a == "--no-config")
     }
 }
 
@@ -515,8 +543,96 @@ where
 {
     input
         .split(',')
-        .map(T::from_str)
-        // collect into HashSet to remove duplicates
+        // Filter out empty strings
+        .filter_map(|s| {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                Some(T::from_str(trimmed))
+            } else {
+                None
+            }
+        })
+        // collect into BTreeSet to remove duplicates
         .collect::<Result<BTreeSet<_>, _>>()
         .map(|set| set.into_iter().collect())
+}
+
+/// Parse URL replacements from JSON string format
+/// Expected format: {"source_domain": "replacement_domain", ...}
+pub fn parse_url_replacements(input: &str) -> Result<IndexMap<String, String>, serde_json::Error> {
+    serde_json::from_str(input)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_set_by_comma_empty_string() {
+        let result: Result<BTreeSet<String>, _> = set_by_comma("");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), BTreeSet::new());
+    }
+
+    #[test]
+    fn test_set_by_comma_whitespace_only() {
+        let result: Result<BTreeSet<String>, _> = set_by_comma("  ");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), BTreeSet::new());
+    }
+
+    #[test]
+    fn test_set_by_comma_single_value() {
+        let result: Result<BTreeSet<String>, _> = set_by_comma("foo");
+        assert!(result.is_ok());
+        let expected: BTreeSet<String> = ["foo".to_string()].into_iter().collect();
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_set_by_comma_multiple_values() {
+        let result: Result<BTreeSet<String>, _> = set_by_comma("foo,bar,baz");
+        assert!(result.is_ok());
+        let expected: BTreeSet<String> = ["foo".to_string(), "bar".to_string(), "baz".to_string()]
+            .into_iter()
+            .collect();
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_set_by_comma_with_whitespace() {
+        let result: Result<BTreeSet<String>, _> = set_by_comma("foo, bar, baz");
+        assert!(result.is_ok());
+        let expected: BTreeSet<String> = ["foo".to_string(), "bar".to_string(), "baz".to_string()]
+            .into_iter()
+            .collect();
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_set_by_comma_trailing_comma() {
+        let result: Result<BTreeSet<String>, _> = set_by_comma("foo,bar,");
+        assert!(result.is_ok());
+        let expected: BTreeSet<String> =
+            ["foo".to_string(), "bar".to_string()].into_iter().collect();
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_set_by_comma_duplicate_values() {
+        let result: Result<BTreeSet<String>, _> = set_by_comma("foo,bar,foo");
+        assert!(result.is_ok());
+        let expected: BTreeSet<String> =
+            ["foo".to_string(), "bar".to_string()].into_iter().collect();
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_set_by_comma_empty_elements() {
+        let result: Result<BTreeSet<String>, _> = set_by_comma("foo,,bar");
+        assert!(result.is_ok());
+        let expected: BTreeSet<String> =
+            ["foo".to_string(), "bar".to_string()].into_iter().collect();
+        assert_eq!(result.unwrap(), expected);
+    }
 }

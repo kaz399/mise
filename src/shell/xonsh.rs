@@ -6,7 +6,7 @@ use std::fmt::Display;
 use indoc::formatdoc;
 
 use crate::path::{PathEscape, to_path_list};
-use crate::shell::{ActivateOptions, Shell};
+use crate::shell::{self, ActivateOptions, Shell};
 
 #[derive(Default)]
 pub struct Xonsh {}
@@ -46,6 +46,7 @@ impl Shell for Xonsh {
         let exe = to_path_list(&[PathEscape::Unix], &exe.to_string_lossy());
 
         let mut out = String::new();
+        out.push_str(&shell::build_deactivation_script(self));
         out.push_str(&self.format_activate_prelude(&opts.prelude));
 
         // use xonsh API instead of $.xsh to allow use inside of .py configs, which start faster due to being compiled to .pyc
@@ -100,10 +101,10 @@ impl Shell for Xonsh {
                     hndl.remove(fn)
                     break
 
-            del XSH.aliases['mise']
-            del XSH.env['MISE_SHELL']
-            del XSH.env['__MISE_DIFF']
-            del XSH.env['__MISE_SESSION']
+            XSH.aliases.pop('mise', None)
+            XSH.env.pop('MISE_SHELL', None)
+            XSH.env.pop('__MISE_DIFF', None)
+            XSH.env.pop('__MISE_SESSION', None)
             "#}
     }
 

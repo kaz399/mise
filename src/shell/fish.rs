@@ -4,12 +4,14 @@ use std::fmt::{Display, Formatter};
 
 use crate::config::Settings;
 use crate::path::{PathEscape, to_path_list};
-use crate::shell::{ActivateOptions, Shell};
+use crate::shell::{self, ActivateOptions, Shell};
 use indoc::formatdoc;
 use shell_escape::unix::escape;
 
 #[derive(Default)]
 pub struct Fish {}
+
+impl Fish {}
 
 impl Shell for Fish {
     fn activate(&self, opts: ActivateOptions) -> String {
@@ -19,13 +21,18 @@ impl Shell for Fish {
 
         let description = "'Update mise environment when changing directories'";
         let mut out = String::new();
+
+        out.push_str(&shell::build_deactivation_script(self));
+
         out.push_str(&self.format_activate_prelude(&opts.prelude));
 
         // much of this is from direnv
         // https://github.com/direnv/direnv/blob/cb5222442cb9804b1574954999f6073cc636eff0/internal/cmd/shell_fish.go#L14-L36
         out.push_str(&formatdoc! {r#"
             set -gx MISE_SHELL fish
-            set -gx __MISE_ORIG_PATH $PATH
+            if not set -q __MISE_ORIG_PATH
+                set -gx __MISE_ORIG_PATH $PATH
+            end
 
             function mise
               if test (count $argv) -eq 0
@@ -155,7 +162,7 @@ impl Display for Fish {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod tests {
     use insta::assert_snapshot;
     use std::path::Path;
@@ -167,6 +174,12 @@ mod tests {
 
     #[test]
     fn test_activate() {
+        // Unset __MISE_ORIG_PATH to avoid PATH restoration logic in output
+        unsafe {
+            std::env::remove_var("__MISE_ORIG_PATH");
+            std::env::remove_var("__MISE_DIFF");
+        }
+
         let fish = Fish::default();
         let exe = Path::new("/some/dir/mise");
         let opts = ActivateOptions {

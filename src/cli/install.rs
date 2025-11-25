@@ -34,16 +34,20 @@ pub struct Install {
     #[clap(long, short, env = "MISE_JOBS", verbatim_doc_comment)]
     jobs: Option<usize>,
 
-    /// Directly pipe stdin/stdout/stderr from plugin to user
-    /// Sets --jobs=1
-    #[clap(long, overrides_with = "jobs")]
-    raw: bool,
+    /// Show what would be installed without actually installing
+    #[clap(long, short = 'n', verbatim_doc_comment)]
+    dry_run: bool,
 
     /// Show installation output
     ///
     /// This argument will print plugin output such as download, configuration, and compilation output.
     #[clap(long, short, action = clap::ArgAction::Count)]
     verbose: u8,
+
+    /// Directly pipe stdin/stdout/stderr from plugin to user
+    /// Sets --jobs=1
+    #[clap(long, overrides_with = "jobs")]
+    raw: bool,
 }
 
 impl Install {
@@ -94,7 +98,11 @@ impl Install {
         let current_versions = ts.list_current_versions();
         // ensure that only current versions are sent to lockfile rebuild
         versions.retain(|tv| current_versions.iter().any(|(_, cv)| tv == cv));
-        config::rebuild_shims_and_runtime_symlinks(&config, ts, &versions).await?;
+
+        // Skip rebuilding shims and symlinks in dry-run mode
+        if !self.dry_run {
+            config::rebuild_shims_and_runtime_symlinks(&config, ts, &versions).await?;
+        }
         Ok(())
     }
 
@@ -108,6 +116,7 @@ impl Install {
                 use_locked_version: true,
                 latest_versions: true,
             },
+            dry_run: self.dry_run,
             ..Default::default()
         }
     }
@@ -155,7 +164,14 @@ impl Install {
         let trs = measure!("get_tool_request_set", {
             config.get_tool_request_set().await?
         });
-        let versions = measure!("fetching missing runtims", {
+
+        // Check for tools that don't exist in the registry
+        // These were tracked during build() before being filtered out
+        for ba in &trs.unknown_tools {
+            // This will error with a proper message like "tool not found in mise tool registry"
+            ba.backend()?;
+        }
+        let versions = measure!("fetching missing runtimes", {
             trs.missing_tools(&config)
                 .await
                 .into_iter()
@@ -181,10 +197,13 @@ impl Install {
                     .await?
             })
         };
-        measure!("rebuild_shims_and_runtime_symlinks", {
-            let ts = config.get_toolset().await?;
-            config::rebuild_shims_and_runtime_symlinks(&config, ts, &versions).await?;
-        });
+        // Skip rebuilding shims and symlinks in dry-run mode
+        if !self.dry_run {
+            measure!("rebuild_shims_and_runtime_symlinks", {
+                let ts = config.get_toolset().await?;
+                config::rebuild_shims_and_runtime_symlinks(&config, ts, &versions).await?;
+            });
+        }
         Ok(())
     }
 }

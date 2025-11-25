@@ -6,10 +6,12 @@ use indoc::formatdoc;
 
 use crate::config::Settings;
 use crate::path::{PathEscape, to_path_list};
-use crate::shell::{ActivateOptions, Shell};
+use crate::shell::{self, ActivateOptions, Shell};
 
 #[derive(Default)]
 pub struct Bash {}
+
+impl Bash {}
 
 impl Shell for Bash {
     fn activate(&self, opts: ActivateOptions) -> String {
@@ -19,16 +21,24 @@ impl Shell for Bash {
         let exe = to_path_list(&[PathEscape::Unix], &exe.to_string_lossy());
 
         let mut out = String::new();
+
+        out.push_str(&shell::build_deactivation_script(self));
+
         out.push_str(&self.format_activate_prelude(&opts.prelude));
         out.push_str(&formatdoc! {r#"
             export MISE_SHELL=bash
-            export __MISE_ORIG_PATH="$PATH"
+
+            # On first activation, save the original PATH
+            # On re-activation, we keep the saved original
+            if [ -z "${{__MISE_ORIG_PATH:-}}" ]; then
+              export __MISE_ORIG_PATH="$PATH"
+            fi
 
             mise() {{
               local command
               command="${{1:-}}"
               if [ "$#" = 0 ]; then
-                command {exe}
+                command '{exe}'
                 return
               fi
               shift
@@ -37,12 +47,12 @@ impl Shell for Bash {
               deactivate|shell|sh)
                 # if argv doesn't contains -h,--help
                 if [[ ! " $@ " =~ " --help " ]] && [[ ! " $@ " =~ " -h " ]]; then
-                  eval "$(command {exe} "$command" "$@")"
+                  eval "$(command '{exe}' "$command" "$@")"
                   return $?
                 fi
                 ;;
               esac
-              command {exe} "$command" "$@"
+              command '{exe}' "$command" "$@"
             }}
 
             _mise_hook() {{
@@ -75,7 +85,7 @@ impl Shell for Bash {
                 fi
 
                 command_not_found_handle() {{
-                    if [[ "$1" != "mise" && "$1" != "mise-"* ]] && {exe} hook-not-found -s bash -- "$1"; then
+                    if [[ "$1" != "mise" && "$1" != "mise-"* ]] && '{exe}' hook-not-found -s bash -- "$1"; then
                       _mise_hook
                       "$@"
                     elif [ -n "$(declare -f _command_not_found_handle)" ]; then
@@ -149,6 +159,11 @@ mod tests {
 
     #[test]
     fn test_activate() {
+        unsafe {
+            std::env::remove_var("__MISE_ORIG_PATH");
+            std::env::remove_var("__MISE_DIFF");
+        }
+
         let bash = Bash::default();
         let exe = Path::new("/some/dir/mise");
         let opts = ActivateOptions {

@@ -7,7 +7,17 @@ ROOT="$(cd "$SCRIPT_DIR"/.. && pwd)"
 source "$SCRIPT_DIR/style.sh"
 
 TEST="$1"
-TEST_SCRIPT="$SCRIPT_DIR/$TEST"
+# Handle both relative and absolute paths
+if [[ $TEST == /* ]]; then
+	# If it's an absolute path, use it as is
+	TEST_SCRIPT="$TEST"
+elif [[ $TEST == e2e/* ]]; then
+	# If it starts with e2e/, treat it as relative to the project root
+	TEST_SCRIPT="$ROOT/$TEST"
+else
+	# Otherwise, treat it as relative to the e2e directory
+	TEST_SCRIPT="$SCRIPT_DIR/$TEST"
+fi
 
 setup_isolated_env() {
 	TEST_ISOLATED_DIR="$(mktemp --tmpdir --directory "$(basename "$TEST").XXXXXX")"
@@ -46,9 +56,9 @@ remove_isolated_env() {
 }
 
 within_isolated_env() {
-	_env \
-		--ignore-environment \
-		--chdir="$TEST_WORKDIR" \
+	env \
+		-i \
+		-C "$TEST_WORKDIR" \
 		- \
 		CARGO_HOME="$CARGO_HOME" \
 		CARGO_LLVM_COV="${CARGO_LLVM_COV:-}" \
@@ -91,17 +101,41 @@ within_isolated_env() {
 }
 
 run_test() {
+	# Check for problematic /tmp/mise.toml that can interfere with tests
+	if [[ -f /tmp/mise.toml ]]; then
+		err "/tmp/mise.toml exists and will interfere with e2e tests. Please remove it."
+		return 1
+	fi
+
 	setup_isolated_env
 	create_isolated_env
 
 	local status=0
 
 	START="$(date +%s)"
-	within_isolated_env bash --noprofile --norc -euo pipefail -c "source $SCRIPT_DIR/assert.sh && source $TEST_SCRIPT" || status=$?
+	# Check shebang to determine which shell to use
+	local shebang
+	shebang="$(head -n 1 "$TEST_SCRIPT")"
+	if [[ $shebang == "#!/usr/bin/env zsh"* ]]; then
+		within_isolated_env zsh -f -euo pipefail -c "source \"$SCRIPT_DIR/assert.sh\" && source \"$TEST_SCRIPT\"" || status=$?
+	elif [[ $shebang == "#!/usr/bin/env fish"* ]]; then
+		within_isolated_env fish --no-config "$TEST_SCRIPT" || status=$?
+	else
+		within_isolated_env bash --noprofile --norc -euo pipefail -c "source \"$SCRIPT_DIR/assert.sh\" && source \"$TEST_SCRIPT\"" || status=$?
+	fi
 	END="$(date +%s)"
 	DURATION=$((END - START))s
 
 	echo "$TEST: $DURATION" >&2
+
+	# Check if test took >20s and isn't marked as slow
+	DURATION_NUM="${DURATION%s}"
+	if [[ $DURATION_NUM -gt 20 && ! $TEST =~ "_slow"$ ]]; then
+		warn "Test $TEST took ${DURATION} (>20s) but is not marked as slow. Consider renaming to ${TEST}_slow"
+		if [[ -n ${GITHUB_ACTIONS:-} ]]; then
+			echo "::warning title=Slow test not marked::Test $TEST took ${DURATION} (>20s). Consider renaming to ${TEST}_slow to improve CI performance." >&2
+		fi
+	fi
 
 	if [[ $status == 0 ]]; then
 		remove_isolated_env
@@ -113,14 +147,6 @@ run_test() {
 	fi
 
 	return "$status"
-}
-
-_env() {
-	if type genv >/dev/null 2>&1; then
-		genv "$@"
-	else
-		env "$@"
-	fi
 }
 
 os() {

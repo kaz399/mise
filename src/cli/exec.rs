@@ -71,8 +71,8 @@ impl Exec {
             // in that case the user probably just wants that one tool
             missing_args_only: !self.tool.is_empty()
                 || !Settings::get().exec_auto_install
-                || !console::user_attended_stderr()
                 || *env::__MISE_SHIM,
+            skip_auto_install: !Settings::get().exec_auto_install || !Settings::get().auto_install,
             resolve_options: Default::default(),
             ..Default::default()
         };
@@ -84,7 +84,12 @@ impl Exec {
         });
 
         let (program, mut args) = parse_command(&env::SHELL, &self.command, &self.c);
-        let env = measure!("env_with_path", { ts.env_with_path(&config).await? });
+        let mut env = measure!("env_with_path", { ts.env_with_path(&config).await? });
+
+        // Ensure MISE_ENV is set in the spawned shell if it was specified via -E flag
+        if !env::MISE_ENV.is_empty() {
+            env.insert("MISE_ENV".to_string(), env::MISE_ENV.join(","));
+        }
 
         if program.rsplit('/').next() == Some("fish") {
             let mut cmd = vec![];
@@ -108,71 +113,72 @@ impl Exec {
         }
 
         time!("exec");
-        self.exec(program, args, env)
+        exec_program(program, args, env)
     }
+}
 
-    #[cfg(all(not(test), unix))]
-    fn exec<T, U>(&self, program: T, args: U, env: BTreeMap<String, String>) -> Result<()>
-    where
-        T: IntoExecutablePath,
-        U: IntoIterator,
-        U::Item: Into<OsString>,
-    {
-        for (k, v) in env.iter() {
-            env::set_var(k, v);
-        }
-        let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
-        let program = program.to_executable();
-        let err = exec::Command::new(program.clone()).args(&args).exec();
-        bail!("{:?} {err}", program.to_string_lossy())
+#[cfg(all(not(test), unix))]
+pub fn exec_program<T, U>(program: T, args: U, env: BTreeMap<String, String>) -> Result<()>
+where
+    T: IntoExecutablePath,
+    U: IntoIterator,
+    U::Item: Into<OsString>,
+{
+    for (k, v) in env.iter() {
+        env::set_var(k, v);
     }
+    let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    let program = program.to_executable();
+    let err = exec::Command::new(program.clone()).args(&args).exec();
+    bail!("{:?} {err}", program.to_string_lossy())
+}
 
-    #[cfg(all(windows, not(test)))]
-    fn exec<T, U>(&self, program: T, args: U, env: BTreeMap<String, String>) -> Result<()>
-    where
-        T: IntoExecutablePath,
-        U: IntoIterator,
-        U::Item: Into<OsString>,
-    {
-        let cwd = crate::dirs::CWD.clone().unwrap_or_default();
-        let program = program.to_executable();
-        let path = env.get(&*env::PATH_KEY).map(OsString::from);
-        let program = which::which_in(program, path, cwd)?;
-        let mut cmd = cmd::cmd(program, args);
-        for (k, v) in env.iter() {
-            cmd = cmd.env(k, v);
-        }
-
-        // Windows does not support exec in the same way as Unix,
-        // so we emulate it instead by not handling Ctrl-C and letting
-        // the child process deal with it instead.
-        win_exec::set_ctrlc_handler()?;
-
-        let res = cmd.unchecked().run()?;
-        match res.status.code() {
-            Some(0) => Ok(()),
-            Some(code) => Err(eyre!("command failed: exit code {}", code)),
-            None => Err(eyre!("command failed: terminated by signal")),
-        }
+#[cfg(all(windows, not(test)))]
+pub fn exec_program<T, U>(program: T, args: U, env: BTreeMap<String, String>) -> Result<()>
+where
+    T: IntoExecutablePath,
+    U: IntoIterator,
+    U::Item: Into<OsString>,
+{
+    for (k, v) in env.iter() {
+        env::set_var(k, v);
     }
+    let cwd = crate::dirs::CWD.clone().unwrap_or_default();
+    let program = program.to_executable();
+    let path = env.get(&*env::PATH_KEY).map(OsString::from);
+    let program = which::which_in(program, path, cwd)?;
+    let cmd = cmd::cmd(program, args);
 
-    #[cfg(test)]
-    fn exec<T, U>(&self, program: T, args: U, env: BTreeMap<String, String>) -> Result<()>
-    where
-        T: IntoExecutablePath,
-        U: IntoIterator,
-        U::Item: Into<OsString>,
-    {
-        let mut cmd = cmd::cmd(program, args);
-        for (k, v) in env.iter() {
-            cmd = cmd.env(k, v);
+    // Windows does not support exec in the same way as Unix,
+    // so we emulate it instead by not handling Ctrl-C and letting
+    // the child process deal with it instead.
+    win_exec::set_ctrlc_handler()?;
+
+    let res = cmd.unchecked().run()?;
+    match res.status.code() {
+        Some(code) => {
+            std::process::exit(code);
         }
-        let res = cmd.unchecked().run()?;
-        match res.status.code() {
-            Some(0) => Ok(()),
-            Some(code) => Err(eyre!("command failed: exit code {}", code)),
-            None => Err(eyre!("command failed: terminated by signal")),
-        }
+        None => Err(eyre!("command failed: terminated by signal")),
+    }
+}
+
+#[cfg(test)]
+pub fn exec_program<T, U>(program: T, args: U, env: BTreeMap<String, String>) -> Result<()>
+where
+    T: IntoExecutablePath,
+    U: IntoIterator,
+    U::Item: Into<OsString>,
+{
+    let mut cmd = cmd::cmd(program, args);
+    for (k, v) in env.iter() {
+        cmd = cmd.env(k, v);
+    }
+    let res = cmd.unchecked().run()?;
+    match res.status.code() {
+        Some(0) => Ok(()),
+        Some(code) => Err(eyre!("command failed: exit code {}", code)),
+        None => Err(eyre!("command failed: terminated by signal")),
     }
 }
 
@@ -214,13 +220,10 @@ fn parse_command(
             let (program, args) = command.split_first().unwrap();
             (program.clone(), args.into())
         }
-        _ => {
-            #[cfg(unix)]
-            let command_flag = "-c";
-            #[cfg(windows)]
-            let command_flag = "/c";
-            (shell.into(), vec![command_flag.into(), c.clone().unwrap()])
-        }
+        _ => (
+            shell.into(),
+            vec![env::SHELL_COMMAND_FLAG.into(), c.clone().unwrap()],
+        ),
     }
 }
 

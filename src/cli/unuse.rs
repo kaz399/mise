@@ -30,13 +30,13 @@ pub struct Unuse {
     #[clap(value_name = "INSTALLED_TOOL@VERSION", required = true)]
     installed_tool: Vec<ToolArg>,
 
-    /// Use the global config file (`~/.config/mise/config.toml`) instead of the local one
-    #[clap(short, long, overrides_with_all = & ["path", "env"])]
-    global: bool,
-
     /// Create/modify an environment-specific config file like .mise.<env>.toml
     #[clap(long, short, overrides_with_all = & ["global", "path"])]
     env: Option<String>,
+
+    /// Use the global config file (`~/.config/mise/config.toml`) instead of the local one
+    #[clap(short, long, overrides_with_all = & ["path", "env"])]
+    global: bool,
 
     /// Specify a path to a config file or directory
     ///
@@ -124,12 +124,12 @@ impl Unuse {
                     .keys()
                     .any(|ba| self.installed_tool.iter().any(|ta| &ta.ba == ba))
                 {
-                    return config_file::parse(cf.get_path());
+                    return config_file::parse(cf.get_path()).await;
                 }
             }
             config::local_toml_config_path()
         };
-        config_file::parse_or_init(&path)
+        config_file::parse_or_init(&path).await
     }
 }
 

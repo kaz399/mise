@@ -1,6 +1,7 @@
 ---
 outline: [1, 3]
 ---
+
 # mise Architecture
 
 This document provides a comprehensive overview of mise's architecture, designed primarily for contributors and those interested in understanding how mise works internally.
@@ -12,7 +13,7 @@ For practical development guidance, see the [Contributing Guide](contributing.md
 mise is a Rust-based tool with a modular architecture centered around three core concepts:
 
 1. **Tool Version Management** - Installing and managing different versions of [development tools](dev-tools/)
-2. **Environment Management** - Setting up [environment variables](environments/) and project contexts  
+2. **Environment Management** - Setting up [environment variables](environments/) and project contexts
 3. **Task Running** - Executing [project tasks](tasks/) with dependency management
 
 These three pillars work together to provide a unified development environment management experience.
@@ -54,7 +55,7 @@ pub trait Backend: Debug + Send + Sync {
 - **Core Backends**: Native Rust implementations for maximum performance
 - **Language Package Managers**: npm, pipx, cargo, gem, go modules
 - **Universal Installers**: ubi (GitHub releases), aqua (comprehensive package management)
-- **Plugin Systems**: [asdf](plugins.md) (legacy compatibility), [vfox](plugins.md) (cross-platform)
+- **Plugin Systems**: [backend plugins](backend-plugin-development.md) (enhanced methods), [tool plugins](tool-plugin-development.md) (hook-based), [asdf plugins](asdf-legacy-plugins.md) (legacy)
 
 For guidance on implementing new backends, see the [Contributing Guide](contributing.md#adding-backends). For detailed backend system design, see [Backend Architecture](dev-tools/backend_architecture.md).
 
@@ -146,8 +147,9 @@ pub trait Plugin: Debug + Send {
 
 **Plugin Types:**
 
-- **asdf Plugins**: Compatible with the asdf plugin ecosystem
-- **vfox Plugins**: Cross-platform plugins using the vfox format
+- **Backend Plugins**: Enhanced plugins with backend methods for managing multiple tools
+- **Tool Plugins**: Hook-based plugins using the traditional vfox format
+- **asdf Plugins**: Legacy plugins compatible with the asdf plugin ecosystem (Linux/macOS only)
 
 For complete plugin documentation, see [Plugin Guide](plugins.md).
 
