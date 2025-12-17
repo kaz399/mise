@@ -207,9 +207,9 @@ impl TaskScriptParser {
 
                 let hide = Self::expect_opt_bool(args.get("hide"), "hide")?.unwrap_or(false);
 
-                let default = Self::expect_opt_string(args.get("default"), "default")?
-                    .map(|s| vec![s])
-                    .unwrap_or_default();
+                let default: Vec<String> = Self::expect_opt_string(args.get("default"), "default")?
+                    .into_iter()
+                    .collect();
 
                 let choices = Self::expect_opt_array(args.get("choices"), "choices")?
                     .map(|array| {
@@ -280,9 +280,9 @@ impl TaskScriptParser {
                     None => vec![name.clone()],
                 };
 
-                let default = Self::expect_opt_string(args.get("default"), "default")?
-                    .map(|s| vec![s])
-                    .unwrap_or_default();
+                let default: Vec<String> = Self::expect_opt_string(args.get("default"), "default")?
+                    .into_iter()
+                    .collect();
 
                 let var = Self::expect_opt_bool(args.get("var"), "var")?.unwrap_or(false);
 
@@ -300,8 +300,11 @@ impl TaskScriptParser {
                 let usage =
                     Self::expect_opt_string(args.get("usage"), "usage")?.unwrap_or_default();
 
-                let required =
+                let mut required =
                     Self::expect_opt_bool(args.get("required"), "required")?.unwrap_or(false);
+                if !default.is_empty() {
+                    required = false;
+                }
 
                 let negate = Self::expect_opt_string(args.get("negate"), "negate")?;
 
@@ -388,9 +391,6 @@ impl TaskScriptParser {
                     None => vec![name.clone()],
                 };
 
-                let default = Self::expect_opt_string(args.get("default"), "default")?
-                    .map(|s| vec![s])
-                    .unwrap_or_default();
 
                 let var = Self::expect_opt_bool(args.get("var"), "var")?.unwrap_or(false);
 
@@ -408,8 +408,16 @@ impl TaskScriptParser {
                 let usage =
                     Self::expect_opt_string(args.get("usage"), "usage")?.unwrap_or_default();
 
-                let required =
+                let mut required =
                     Self::expect_opt_bool(args.get("required"), "required")?.unwrap_or(false);
+
+                let default: Vec<String> =
+                    Self::expect_opt_string(args.get("default"), "default")?
+                    .into_iter()
+                    .collect();
+                if !default.is_empty() {
+                    required = false;
+                }
 
                 let negate = Self::expect_opt_string(args.get("negate"), "negate")?;
 
