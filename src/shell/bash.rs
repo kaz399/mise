@@ -6,6 +6,7 @@ use indoc::formatdoc;
 use shell_escape::unix::escape;
 
 use crate::config::Settings;
+use crate::path::{PathEscape, to_path_list};
 use crate::shell::{self, ActivateOptions, Shell};
 
 #[derive(Default)]
@@ -18,8 +19,7 @@ impl Shell for Bash {
         let exe = opts.exe;
         let flags = opts.flags;
         let settings = Settings::get();
-
-        let exe = escape(exe.to_string_lossy());
+        let exe = to_path_list(&[PathEscape::Unix], &exe.to_string_lossy());
 
         let mut out = String::new();
 
@@ -118,12 +118,12 @@ impl Shell for Bash {
     }
 
     fn set_env(&self, k: &str, v: &str) -> String {
-        let k = shell_escape::unix::escape(k.into());
-        let v = shell_escape::unix::escape(v.into());
+        let (k, v) = self.escape_env_pair(k, v);
         format!("export {k}={v}\n")
     }
 
     fn prepend_env(&self, k: &str, v: &str) -> String {
+        let (k, v) = self.escape_env_pair(k, v);
         format!("export {k}=\"{v}:${k}\"\n")
     }
 
@@ -140,6 +140,18 @@ impl Shell for Bash {
     fn unset_alias(&self, name: &str) -> String {
         let name = shell_escape::unix::escape(name.into());
         format!("unalias {name} 2>/dev/null || true\n")
+    }
+
+    fn escape_env_pair(&self, k: &str, v: &str) -> (String, String) {
+        let v = match k {
+            "PATH" => to_path_list(&[PathEscape::Unix], v),
+            _ => v.to_string(),
+        };
+
+        let k = shell_escape::unix::escape(k.into());
+        let v = shell_escape::unix::escape(v.into());
+
+        (k.to_string(), v.to_string())
     }
 }
 

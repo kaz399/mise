@@ -77,6 +77,7 @@ pub trait Shell: Display {
     fn set_env(&self, k: &str, v: &str) -> String;
     fn prepend_env(&self, k: &str, v: &str) -> String;
     fn unset_env(&self, k: &str) -> String;
+    fn escape_env_pair(&self, k: &str, v: &str) -> (String, String);
 
     /// Set a shell alias. Returns empty string if not supported by this shell.
     fn set_alias(&self, name: &str, cmd: &str) -> String {

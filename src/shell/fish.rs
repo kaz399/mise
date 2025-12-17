@@ -4,6 +4,7 @@ use std::fmt::{Display, Formatter};
 
 use crate::config::Settings;
 use crate::env::{self};
+use crate::path::{PathEscape, to_path_list};
 use crate::shell::{self, ActivateOptions, Shell};
 use indoc::formatdoc;
 use itertools::Itertools;
@@ -18,8 +19,7 @@ impl Shell for Fish {
     fn activate(&self, opts: ActivateOptions) -> String {
         let exe = opts.exe;
         let flags = opts.flags;
-
-        let exe = escape(exe.to_string_lossy());
+        let exe = to_path_list(&[PathEscape::Unix], &exe.to_string_lossy());
         let description = "'Update mise environment when changing directories'";
         let mut out = String::new();
 
@@ -179,6 +179,18 @@ impl Shell for Fish {
     fn unset_alias(&self, name: &str) -> String {
         let name = escape(name.into());
         format!("functions -e {name}\n")
+    }
+
+    fn escape_env_pair(&self, k: &str, v: &str) -> (String, String) {
+        let v = match k {
+            "PATH" => to_path_list(&[PathEscape::Unix], v),
+            _ => v.to_string(),
+        };
+
+        let k = shell_escape::unix::escape(k.into());
+        let v = shell_escape::unix::escape(v.into());
+
+        (k.to_string(), v.to_string())
     }
 }
 

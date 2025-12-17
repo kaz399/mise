@@ -6,6 +6,7 @@ use indoc::formatdoc;
 use shell_escape::unix::escape;
 
 use crate::config::Settings;
+use crate::path::{PathEscape, to_path_list};
 use crate::shell::bash::Bash;
 use crate::shell::{self, ActivateOptions, Shell};
 
@@ -18,8 +19,7 @@ impl Shell for Zsh {
     fn activate(&self, opts: ActivateOptions) -> String {
         let exe = opts.exe;
         let flags = opts.flags;
-
-        let exe = escape(exe.to_string_lossy());
+        let exe = to_path_list(&[PathEscape::Unix], &exe.to_string_lossy());
         let mut out = String::new();
 
         out.push_str(&shell::build_deactivation_script(self));
@@ -125,7 +125,7 @@ impl Shell for Zsh {
     }
 
     fn prepend_env(&self, k: &str, v: &str) -> String {
-        format!("export {k}=\"{v}:${k}\"\n")
+        Bash::default().prepend_env(k, v)
     }
 
     fn unset_env(&self, k: &str) -> String {
@@ -138,6 +138,10 @@ impl Shell for Zsh {
 
     fn unset_alias(&self, name: &str) -> String {
         Bash::default().unset_alias(name)
+    }
+
+    fn escape_env_pair(&self, k: &str, v: &str) -> (String, String) {
+        Bash::default().escape_env_pair(k, v)
     }
 }
 

@@ -4,6 +4,7 @@ use std::fmt::Display;
 
 use indoc::formatdoc;
 
+use crate::path::{PathEscape, to_path_list};
 use crate::shell::{self, ActivateOptions, ActivatePrelude, Shell};
 use itertools::Itertools;
 
@@ -37,8 +38,14 @@ impl Nushell {
         prelude
             .iter()
             .map(|p| match p {
-                ActivatePrelude::SetEnv(k, v) => format!("$env.{k} = r#'{v}'#\n"),
-                ActivatePrelude::PrependEnv(k, v) => self.prepend_env(k, v),
+                ActivatePrelude::SetEnv(k, v) => {
+                    let (_, v) = self.escape_env_value(k, v);
+                    format!("$env.{k} = r#'{v}'#\n")
+                }
+                ActivatePrelude::PrependEnv(k, v) => {
+                    let (_, v) = self.escape_env_value(k, v);
+                    format!("$env.{k} = ($env.{k} | prepend r#'{v}'#)\n")
+                }
             })
             .join("")
     }
@@ -47,13 +54,25 @@ impl Nushell {
         let deactivation_ops = shell::build_deactivation_script(self);
         deactivation_ops.trim_end_matches('\n').to_owned()
     }
+
+    fn escape_env_value(&self, k: &str, v: &str) -> (String, String) {
+        let v = match k {
+            "PATH" => to_path_list(&[PathEscape::Unix], v),
+            _ => v.to_string(),
+        };
+
+        (k.to_string(), v)
+    }
 }
 
 impl Shell for Nushell {
     fn activate(&self, opts: ActivateOptions) -> String {
         let exe = opts.exe;
         let flags = opts.flags;
-        let exe = exe.to_string_lossy().replace('\\', r#"\\"#);
+        let exe = to_path_list(
+            &[PathEscape::Unix, PathEscape::EscapeBackslash],
+            &exe.to_string_lossy(),
+        );
 
         let mut out = String::new();
 
@@ -135,19 +154,27 @@ impl Shell for Nushell {
     }
 
     fn set_env(&self, k: &str, v: &str) -> String {
-        let k = Nushell::escape_csv_value(k);
-        let v = Nushell::escape_csv_value(v);
-
+        let (k, v) = self.escape_env_pair(k, v);
         EnvOp::Set { key: &k, val: &v }.to_string()
     }
 
     fn prepend_env(&self, k: &str, v: &str) -> String {
+        let (_, v) = self.escape_env_value(k, v);
         format!("$env.{k} = ($env.{k} | prepend r#'{v}'#)\n")
     }
 
     fn unset_env(&self, k: &str) -> String {
         let k = Nushell::escape_csv_value(k);
         EnvOp::Hide { key: k.as_ref() }.to_string()
+    }
+
+    fn escape_env_pair(&self, k: &str, v: &str) -> (String, String) {
+        let (k, v) = self.escape_env_value(k, v);
+
+        let k = Nushell::escape_csv_value(&k);
+        let v = Nushell::escape_csv_value(&v);
+
+        (k.to_string(), v.to_string())
     }
 }
 
