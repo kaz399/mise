@@ -101,6 +101,7 @@ export default withMermaid(
                 { text: "cargo", link: "/dev-tools/backends/cargo" },
                 { text: "conda", link: "/dev-tools/backends/conda" },
                 { text: "dotnet", link: "/dev-tools/backends/dotnet" },
+                { text: "forgejo", link: "/dev-tools/backends/forgejo" },
                 { text: "gem", link: "/dev-tools/backends/gem" },
                 { text: "github", link: "/dev-tools/backends/github" },
                 { text: "gitlab", link: "/dev-tools/backends/gitlab" },
@@ -172,6 +173,7 @@ export default withMermaid(
           text: "About",
           items: [
             { text: "About mise", link: "/about" },
+            { text: "Glossary", link: "/glossary" },
             { text: "FAQs", link: "/faq" },
             { text: "Troubleshooting", link: "/troubleshooting" },
             { text: "Tips & Tricks", link: "/tips-and-tricks" },

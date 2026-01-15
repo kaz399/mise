@@ -6,6 +6,9 @@ use std::path::MAIN_SEPARATOR_STR;
 use toml_edit::Item;
 
 /// Create a new task
+///
+/// Adds a task to the local mise.toml file.
+/// See https://mise.jdx.dev/configuration.html#target-file-for-write-operations
 #[derive(Debug, clap::Args)]
 #[clap(verbatim_doc_comment, after_long_help = AFTER_LONG_HELP)]
 pub struct TasksAdd {
@@ -28,7 +31,7 @@ pub struct TasksAdd {
     /// Create a file task instead of a toml task
     #[clap(long, short)]
     file: bool,
-    /// Hide the task from `mise task` and completions
+    /// Hide the task from `mise tasks` and completions
     #[clap(long, short = 'H')]
     hide: bool,
     /// Do not print the command before running
@@ -222,6 +225,6 @@ impl TasksAdd {
 static AFTER_LONG_HELP: &str = color_print::cstr!(
     r#"<bold><underline>Examples:</underline></bold>
 
-    $ <bold>mise task add pre-commit --depends "test" --depends "render" -- echo pre-commit</bold>
+    $ <bold>mise tasks add pre-commit --depends "test" --depends "render" -- echo pre-commit</bold>
 "#
 );

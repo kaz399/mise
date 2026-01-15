@@ -6,6 +6,9 @@
 
 Create a new task
 
+Adds a task to the local mise.toml file.
+See <https://mise.jdx.dev/configuration.html#target-file-for-write-operations>
+
 ## Arguments
 
 ### `<TASK>`
@@ -34,7 +37,7 @@ Create a file task instead of a toml task
 
 ### `-H --hide`
 
-Hide the task from `mise task` and completions
+Hide the task from `mise tasks` and completions
 
 ### `-q --quiet`
 
@@ -79,5 +82,5 @@ Do not print the command or its output
 Examples:
 
 ```
-mise task add pre-commit --depends "test" --depends "render" -- echo pre-commit
+mise tasks add pre-commit --depends "test" --depends "render" -- echo pre-commit
 ```

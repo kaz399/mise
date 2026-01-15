@@ -1995,7 +1995,7 @@ const completionSpec: Fig.Spec = {
         {
           name: ["-n", "--dry-run"],
           description:
-            "Don't actually run the tasks(s), just print them in order of execution",
+            "Don't actually run the task(s), just print them in order of execution",
           isRepeatable: false,
         },
         {
@@ -2566,7 +2566,7 @@ const completionSpec: Fig.Spec = {
             },
             {
               name: ["-H", "--hide"],
-              description: "Hide the task from `mise task` and completions",
+              description: "Hide the task from `mise tasks` and completions",
               isRepeatable: false,
             },
             {
@@ -2684,18 +2684,17 @@ const completionSpec: Fig.Spec = {
         },
         {
           name: "edit",
-          description: "Edit a tasks with $EDITOR",
+          description: "Edit a task with $EDITOR",
           options: [
             {
               name: ["-p", "--path"],
-              description:
-                "Display the path to the tasks instead of editing it",
+              description: "Display the path to the task instead of editing it",
               isRepeatable: false,
             },
           ],
           args: {
             name: "task",
-            description: "Tasks to edit",
+            description: "Task to edit",
             generators: simpleTaskGenerator,
             debounce: true,
           },
@@ -2814,7 +2813,7 @@ const completionSpec: Fig.Spec = {
             {
               name: ["-n", "--dry-run"],
               description:
-                "Don't actually run the tasks(s), just print them in order of execution",
+                "Don't actually run the task(s), just print them in order of execution",
               isRepeatable: false,
             },
             {
@@ -3272,6 +3271,18 @@ const completionSpec: Fig.Spec = {
           isRepeatable: false,
         },
         {
+          name: ["-x", "--exclude"],
+          description: "Tool(s) to exclude from upgrading\ne.g.: go python",
+          isRepeatable: true,
+          args: {
+            name: "installed_tool",
+            generators: completionGeneratorTemplate(
+              `mise ls -i | awk '{print $1}' | uniq`
+            ),
+            debounce: true,
+          },
+        },
+        {
           name: "--before",
           description: "Only upgrade to versions released before this date",
           isRepeatable: false,
@@ -3287,12 +3298,12 @@ const completionSpec: Fig.Spec = {
         },
       ],
       args: {
-        name: "tool@version",
+        name: "installed_tool@version",
         description:
           "Tool(s) to upgrade\ne.g.: node@20 python@3.10\nIf not specified, all current tools will be upgraded",
         isOptional: true,
         isVariadic: true,
-        generators: toolVersionGenerator,
+        generators: installedToolVersionGenerator,
         debounce: true,
       },
     },
@@ -3843,6 +3854,16 @@ const completionSpec: Fig.Spec = {
     {
       name: "--no-config",
       description: "Do not load any config files",
+      isRepeatable: false,
+    },
+    {
+      name: "--no-env",
+      description: "Do not load environment variables from config files",
+      isRepeatable: false,
+    },
+    {
+      name: "--no-hooks",
+      description: "Do not execute hooks from config files",
       isRepeatable: false,
     },
     {

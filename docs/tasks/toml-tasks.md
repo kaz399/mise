@@ -74,7 +74,7 @@ run = './scripts/test-e2e.sh {{vars.e2e_args}} $VERBOSE_ARGS'
 You can edit the `mise.toml` file directly or using [`mise tasks add`](/cli/tasks/add)
 
 ```shell
-mise task add pre-commit --depends "test" --depends "render" -- echo pre-commit
+mise tasks add pre-commit --depends "test" --depends "render" -- echo pre-commit
 ```
 
 will add the following to `mise.toml`:
@@ -146,7 +146,7 @@ alias = 'b' # `mise run b`
 ```shell
 ❯ mise run
 Tasks
-# Select a tasks to run
+# Select a task to run
 # > build  Build the CLI
 #   test   Run the tests
 ```
@@ -554,60 +554,3 @@ fi
 The value will be `true` if the flag is passed, and `false` otherwise.
 
 </details>
-
-### Advanced Usage Specs
-
-More advanced usage specs can be added to the task's `usage` field:
-
-```mise-toml
-[tasks.add-user]
-description = "Add a user"
-usage = '''
-arg "<user>" default="unknown"
-complete "user" run="mise run list-users-completion"
-'''
-run = 'echo {{arg(name="user")}}'
-
-[tasks.list-users-completion]
-hide = true
-quiet = true # this is mandatory to make completion work (makes the mise command just print "alice bob charlie")
-description = "List users"
-run = 'echo "alice\nbob\ncharlie"'
-```
-
-Arguments and flags defined in the usage spec are also set in the environment before running each script defined in the `run` field. The name of each variable is prepended with `usage_` keyword.
-
-```mise-toml
-[tasks.usage-env-example]
-usage = '''
-arg "myarg" "myarg description" default="foo"
-'''
-run = 'echo myarg=${usage_myarg?}'
-
-# execute: mise run usage-env-example
-# outputs: myarg=foo
-
-# execute: mise run usage-env-example bar
-# outputs: myarg=bar
-```
-
-```mise-toml
-[tasks.usage-env-example]
-usage = '''
-flag "-m --myflag <myflag>" default="false"
-'''
-run = [
-'echo "Command 1: ${usage_myflag?}"',
-'echo "Command 2: {{flag(name="myflag", default="false")}} ${usage_myflag?}"',
-]
-
-# execute: mise run usage-env-example
-# outputs:
-# Command 1: false
-# Command 2: false false
-
-# execute: mise run usage-env-example --myflag true
-# outputs:
-# Command 1: true
-# Command 2: true true
-```
